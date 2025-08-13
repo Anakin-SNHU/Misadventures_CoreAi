@@ -15,7 +15,7 @@ GameObject:
   - component: {fileID: 1178018056324293318}
   - component: {fileID: 1825904448020551464}
   - component: {fileID: 4313113764017141042}
-  m_Layer: 0
+  m_Layer: 11
   m_Name: PlayerProxy
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -137,7 +137,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   alertKey: 102
   alertRadius: 12
-  alertLifetime: 2
+  alertLifetime: 1
   alertPulseMaterial: {fileID: 2100000, guid: 37ac1579f8383ec4ba265f067c6640fe, type: 2}
   outlineMaterial: {fileID: 2100000, guid: c271b99bab5b7a346bc44565a4b5cea9, type: 2}
   id: 0
