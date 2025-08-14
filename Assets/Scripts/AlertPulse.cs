@@ -4,41 +4,48 @@ using UnityEngine;
 
 public class AlertPulse : MonoBehaviour
 {
-    public float maxRadius = 10f;     // final visual radius of the pulse
-    public float lifetime = 2f;       // how long the pulse should live
-    public Material pulseMaterial;    // transparent material to fade out
+    public float maxRadius = 10f;
+    public float lifetime = 2f;
+    public Material pulseMaterial;
 
-    float age;                        // seconds since spawn
-    MeshRenderer mr;                  // renderer we tint/fade
-    Color baseColor;                  // starting color (with alpha)
+    float age;
+    MeshRenderer mr;
+    Color baseColor;
+    int pulseId;
+    static int nextId = 1;
 
     void Start()
     {
-        mr = GetComponent<MeshRenderer>();                 // sphere has one by default
-        mr.material = new Material(pulseMaterial);         // instance so we can change alpha per pulse
-        baseColor = mr.material.color;                     // remember initial color
+        mr = GetComponent<MeshRenderer>();
+        mr.material = new Material(pulseMaterial);
+        baseColor = mr.material.color;
 
-        var col = GetComponent<Collider>();                // remove collider so it never blocks clicks
+        var col = GetComponent<Collider>();
         if (col) Destroy(col);
 
-        gameObject.layer = LayerMask.NameToLayer("Ignore Raycast"); // keep drag raycasts clean
-        transform.localScale = Vector3.one * 0.01f;        // start tiny and expand
+        gameObject.layer = LayerMask.NameToLayer("Ignore Raycast");
+        transform.localScale = Vector3.one * 0.01f;
+
+        pulseId = nextId++; // unique id for this pulse
     }
 
     void Update()
     {
-        age += Time.deltaTime;                              // advance timer
-        var t = Mathf.Clamp01(age / lifetime);              // normalized 0..1 time
+        age += Time.deltaTime;
+        float t = Mathf.Clamp01(age / lifetime);
 
-        // Expand from 0 to diameter of maxRadius over lifetime
-        float diameter = maxRadius * 2f;
-        transform.localScale = Vector3.one * Mathf.Lerp(0.01f, diameter, t);
+        float currentRadius = Mathf.Lerp(0f, maxRadius, t);
+        float diameter = Mathf.Max(0.01f, currentRadius * 2f);
+        transform.localScale = Vector3.one * diameter;
 
-        // Fade alpha to 0 over time (keeps color hue but makes it transparent)
         var c = baseColor;
         c.a = Mathf.Lerp(baseColor.a, 0f, t);
         mr.material.color = c;
 
-        if (age >= lifetime) Destroy(gameObject);           // auto-cleanup
+        // MUST be present: broadcast the expanding wavefront
+        NoiseSystem.EmitPulse(new NoisePulse(pulseId, transform.position, currentRadius, 0));
+
+        if (age >= lifetime) Destroy(gameObject);
     }
+
 }
