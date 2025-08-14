@@ -3,13 +3,12 @@ using System.Collections.Generic;
 using System;
 using UnityEngine;
 
-// Simple event payload other systems (AI) can listen to later
 public struct NoiseEvent
 {
-    public Vector3 position; // where the sound originated
-    public float radius;     // how far it should be "heard"
-    public int sourceId;     // which player proxy made it
-    public float time;       // when it happened
+    public Vector3 position;
+    public float radius;     // max radius for legacy users (kept)
+    public int sourceId;
+    public float time;
 
     public NoiseEvent(Vector3 pos, float r, int id)
     {
@@ -20,15 +19,33 @@ public struct NoiseEvent
     }
 }
 
-public static class NoiseSystem
+// New: live pulse tick carrying expanding radius
+public struct NoisePulse
 {
-    // Subscribe: NoiseSystem.OnNoiseEmitted += (e) => { ... };
-    public static event Action<NoiseEvent> OnNoiseEmitted;
+    public int pulseId;
+    public Vector3 position;
+    public float currentRadius;
+    public int sourceId;
+    public float time;
 
-    public static void Emit(NoiseEvent e)
+    public NoisePulse(int id, Vector3 pos, float r, int src)
     {
-        // Null-propagation ensures no exception when no listeners are present
-        OnNoiseEmitted?.Invoke(e);
+        pulseId = id;
+        position = pos;
+        currentRadius = r;
+        sourceId = src;
+        time = Time.time;
     }
 }
 
+public static class NoiseSystem
+{
+    public static event Action<NoiseEvent> OnNoiseEmitted;
+
+    // New: fired every frame by AlertPulse as the sphere expands
+    public static event Action<NoisePulse> OnNoisePulse;
+
+    public static void Emit(NoiseEvent e) => OnNoiseEmitted?.Invoke(e);
+
+    public static void EmitPulse(NoisePulse p) => OnNoisePulse?.Invoke(p);
+}
