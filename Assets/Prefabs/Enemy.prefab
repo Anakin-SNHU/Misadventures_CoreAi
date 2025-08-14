@@ -244,7 +244,18 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 71cb5097ba1a5ed4babc9eda623130cf, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  cam: {fileID: 0}
+  mode: 1
+  dragMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  maxRayDistance: 200
+  navSampleMaxDistance: 1.5
+  navAreaMask: -1
+  capsuleSkin: 0.02
+  maxSlidePerFrame: 5
+  planarSmoothTime: 0.08
+  ySmoothTime: 0.05
+  maxSmoothSpeed: 50
 --- !u!114 &-1744302424632200867
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -258,8 +269,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   group: {fileID: 0}
-  viewAngle: 70
-  viewDistance: 12
+  viewAngle: 45
+  viewDistance: 20
   hearingRadius: 14
   visionObstacles:
     serializedVersion: 2
@@ -273,3 +284,8 @@ MonoBehaviour:
   selectedEmissionStrength: 2
   hearingMaterial: {fileID: 2100000, guid: 76ca8c9e8d102954eb9d8f7507283d6b, type: 2}
   hearingHeight: 0.05
+  attackDamage: 10
+  attackWindup: 1
+  attackRecovery: 0.25
+  attackPulseMaterial: {fileID: 2100000, guid: 3ea299e85eab37b4393ae46a6f5e6a34, type: 2}
+  huntingTimeout: 6

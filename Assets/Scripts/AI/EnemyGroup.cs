@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.AI;
 
 namespace Misadventures.AI
 {
@@ -20,13 +21,28 @@ namespace Misadventures.AI
         public float huntDuration = 7f;        // time to keep area at last seen
         public float returnDelay = 0.1f;       // tiny delay before teleport home
 
-        [Header("Selection and Scaling")]
+        [Header("Selection and Radius Scaling")]
         public static EnemyGroup Active;
-        public KeyCode growKey = KeyCode.Equals;   // +
-        public KeyCode shrinkKey = KeyCode.Minus;  // -
+        public KeyCode growKey = KeyCode.Equals;   // +  (patrol radius)
+        public KeyCode shrinkKey = KeyCode.Minus;  // -  (patrol radius)
         public float radiusStep = 1f;
 
+        [Header("Group Enemy Scaling (only affects Active group)")]
+        public KeyCode memberShrinkKey = KeyCode.LeftBracket;   // [
+        public KeyCode memberGrowKey = KeyCode.RightBracket;  // ]
+        public float memberScaleStep = 1.10f;  // 10% per tap
+        public float memberMinScale = 0.25f;
+        public float memberMaxScale = 3.0f;
+
+        [Header("Visuals")]
+        public bool randomizeColorOnStart = true;
+
+        // Registered enemies in this group
         private readonly List<EnemyAI> members = new List<EnemyAI>();
+
+        public IReadOnlyList<EnemyAI> Members => members;
+
+
         private Vector3 originalHome;
         private float huntTimer;
         private bool atLastSeen;
@@ -41,8 +57,7 @@ namespace Misadventures.AI
             if (!TryGetComponent<Collider>(out var col))
                 col = gameObject.AddComponent<SphereCollider>();
 
-            var sc = col as SphereCollider;
-            if (sc != null)
+            if (col is SphereCollider sc)
             {
                 sc.radius = 1f;
                 sc.isTrigger = true;
@@ -56,6 +71,22 @@ namespace Misadventures.AI
             var gv = GetComponent<GroupVisuals>();
             if (gv != null) areaRenderer = gv.AreaRenderer;
             if (areaRenderer != null) areaBaseColor = areaRenderer.sharedMaterial.color;
+
+            if (areaRenderer != null)
+            {
+                areaBaseColor = areaRenderer.material.color;
+
+                if (randomizeColorOnStart)
+                {
+                    float h = Random.value;
+                    float s = 0.6f;
+                    float v = 0.5f;
+                    Color rand = Color.HSVToRGB(h, s, v);
+                    rand.a = areaBaseColor.a;
+                    areaRenderer.material.color = rand;
+                    areaBaseColor = rand;
+                }
+            }
         }
 
         public void ResetHome()
@@ -68,10 +99,16 @@ namespace Misadventures.AI
 
         void Update()
         {
+            // Patrol radius hotkeys + selection highlight
             if (Active == this)
             {
                 if (Input.GetKeyDown(growKey)) patrolRadius += radiusStep;
                 if (Input.GetKeyDown(shrinkKey)) patrolRadius = Mathf.Max(1f, patrolRadius - radiusStep);
+
+                // Group-only member scaling
+                if (Input.GetKeyDown(memberGrowKey)) ScaleMembers(memberScaleStep);
+                if (Input.GetKeyDown(memberShrinkKey)) ScaleMembers(1f / memberScaleStep);
+
                 SetHighlight(true);
             }
             else
@@ -79,6 +116,7 @@ namespace Misadventures.AI
                 SetHighlight(false);
             }
 
+            // Hunt countdown -> teleport home
             if (atLastSeen)
             {
                 huntTimer -= Time.deltaTime;
@@ -100,19 +138,13 @@ namespace Misadventures.AI
         {
             if (areaRenderer == null) return;
 
-            // work on an instance so we do not affect other groups
-            var mat = areaRenderer.material;
+            var mat = areaRenderer.material;   // instance
 
-            // start from the original color (keep alpha)
             Color baseC = areaBaseColor;
-
             if (on)
             {
-                // slightly brighter and a hint of emission
-                Color lit = Color.Lerp(baseC, Color.white, 0.25f);   // 25% toward white
+                Color lit = Color.Lerp(baseC, Color.white, 0.25f);
                 mat.color = lit;
-
-                // gentle emission (retain original hue)
                 Color emissive = lit * 0.35f;
                 mat.EnableKeyword("_EMISSION");
                 mat.SetColor("_EmissionColor", emissive);
@@ -124,7 +156,6 @@ namespace Misadventures.AI
                 mat.SetColor("_EmissionColor", Color.black);
             }
         }
-
 
         void OnMouseDown()
         {
@@ -150,7 +181,7 @@ namespace Misadventures.AI
                 return;
             }
 
-            // NOTE: no parent so group movement does not drag enemies
+            // No parent so group movement/teleport does not drag enemies
             var obj = Instantiate(enemyPrefab, spawnPoint.position, Quaternion.identity);
             var ai = obj.GetComponent<EnemyAI>() ?? obj.AddComponent<EnemyAI>();
             Register(ai);
@@ -163,5 +194,44 @@ namespace Misadventures.AI
             huntTimer = duration;
             atLastSeen = true;
         }
+
+        // ---- Group member scaling ----
+        void ScaleMembers(float factor)
+        {
+            for (int i = members.Count - 1; i >= 0; i--)
+            {
+                var ai = members[i];
+                if (ai == null) { members.RemoveAt(i); continue; }
+
+                // clamp per-enemy
+                float current = ai.transform.localScale.x;
+                float clamped = Mathf.Clamp(current * factor, memberMinScale, memberMaxScale);
+                float actual = clamped / current;
+
+                // visual scale
+                ai.transform.localScale = new Vector3(clamped, clamped, clamped);
+
+                // scale gameplay ranges
+                ai.viewDistance *= actual;
+                ai.hearingRadius *= actual;
+                ai.attackRange *= actual;
+
+                // keep agent hull in sync
+                var agent = ai.GetComponent<NavMeshAgent>();
+                if (agent != null)
+                {
+                    agent.radius *= actual;
+                    agent.height *= actual;
+                    // keep attack stopping distance near edge of new range
+                    if (ai.enabled && agent.enabled && agent.stoppingDistance > 0f)
+                        agent.stoppingDistance = Mathf.Max(0.01f, ai.attackRange * 0.9f);
+                }
+
+                // refresh cone distance immediately
+                ai.ApplyVisionForExternalChange();
+                // hearing visual auto-updates in EnemyAI.Update()
+            }
+        }
     }
 }
+
