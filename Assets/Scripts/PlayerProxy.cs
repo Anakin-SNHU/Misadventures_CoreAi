@@ -6,7 +6,9 @@ using UnityEngine;
 public class PlayerProxy : MonoBehaviour
 {
     public KeyCode alertKey = KeyCode.F;
-    public float alertRadius = 12f;
+    public float baseAlertRadius = 12f;     // replaces alertRadius for clarity
+    int noiseLevel = 2;                     // 1..3
+    readonly float[] levelMul = { 0f, 0.5f, 1f, 2f }; // index by 1..3
     public float alertLifetime = 2f;
     public Material alertPulseMaterial;
     public Material outlineMaterial;     // NEW — assigned in inspector
@@ -39,25 +41,40 @@ public class PlayerProxy : MonoBehaviour
 
     void Update()
     {
-        if (this == Active && Input.GetKeyDown(alertKey))
+        // pick level hotkeys
+        if (this == Active)
         {
-            EmitAlert();
+            if (Input.GetKeyDown(KeyCode.Alpha1)) { noiseLevel = 1; EmitAlert(); }
+            if (Input.GetKeyDown(KeyCode.Alpha2)) { noiseLevel = 2; EmitAlert(); }
+            if (Input.GetKeyDown(KeyCode.Alpha3)) { noiseLevel = 3; EmitAlert(); }
+
+            // Keep F as "emit current level"
+            if (Input.GetKeyDown(alertKey)) EmitAlert();
         }
+
     }
 
     void EmitAlert()
     {
-        NoiseSystem.Emit(new NoiseEvent(transform.position, alertRadius, id));
+        float mul = Mathf.Clamp(noiseLevel, 1, 3);
+        float radius = baseAlertRadius * levelMul[(int)mul];
 
+        // Broadcast gameplay event (legacy one-shot, optional)
+        NoiseSystem.Emit(new NoiseEvent(transform.position, radius, id));
+
+        // Visual pulse
         var sphere = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        sphere.name = $"AlertPulse_P{id}";
+        sphere.name = $"AlertPulse_P{id}_L{noiseLevel}";
         sphere.transform.position = transform.position;
 
         var pulse = sphere.AddComponent<AlertPulse>();
-        pulse.maxRadius = alertRadius;
+        pulse.maxRadius = radius;
         pulse.lifetime = alertLifetime;
         pulse.pulseMaterial = alertPulseMaterial;
+
+        Debug.Log($"PlayerProxy {id}: noise level {noiseLevel}, radius {radius}");
     }
+
 
     void SetOutline(bool enabled)
     {
