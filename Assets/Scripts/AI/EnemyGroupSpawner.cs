@@ -6,23 +6,24 @@ namespace Misadventures.AI
 {
     public class EnemyGroupSpawner : MonoBehaviour
     {
-        public EnemyGroup groupPrefab;
-        public GameObject enemyPrefab;
-        public SpawnerAnchor spawnerPrefab;
-        public Material spawnerMaterial;
+        public EnemyGroup groupPrefab;       // Prefab used to create a new enemy group
+        public GameObject enemyPrefab;       // Prefab for individual enemy units
+        public SpawnerAnchor spawnerPrefab;  // Prefab for the group's anchor/spawn marker
+        public Material spawnerMaterial;     // Material applied to the spawner's visual
 
-        public KeyCode spawnGroupKey = KeyCode.G;
-        public KeyCode duplicateGroupKey = KeyCode.H;
-        public KeyCode spawnEnemyKey = KeyCode.J;
+        public KeyCode spawnGroupKey = KeyCode.G;      // Hotkey: spawn a new group
+        public KeyCode duplicateGroupKey = KeyCode.H;  // Hotkey: duplicate current active group
+        public KeyCode spawnEnemyKey = KeyCode.J;      // Hotkey: spawn an enemy in active group
 
-        void Update()
+        private void Update()
         {
             if (Input.GetKeyDown(spawnGroupKey)) SpawnGroupNearCamera();
             if (Input.GetKeyDown(duplicateGroupKey)) DuplicateActiveGroup();
             if (Input.GetKeyDown(spawnEnemyKey)) SpawnEnemyInActiveGroup();
         }
 
-        void SpawnGroupNearCamera()
+        // Spawns a new enemy group in front of the main camera with its own anchor
+        private void SpawnGroupNearCamera()
         {
             var cam = Camera.main ?? Object.FindAnyObjectByType<Camera>();
             if (!cam) { Debug.LogError("GroupSpawner: No camera."); return; }
@@ -43,15 +44,25 @@ namespace Misadventures.AI
             Debug.Log("Spawned EnemyGroup + SpawnerAnchor (linked).");
         }
 
-        void DuplicateActiveGroup()
+        // Creates a duplicate of the currently active group along with a new anchor
+        private void DuplicateActiveGroup()
         {
             if (EnemyGroup.Active == null) { Debug.LogWarning("No Active group."); return; }
 
             Vector3 offset = Vector3.right * (EnemyGroup.Active.patrolRadius * 2f + 2f);
-            var spawnerClone = Instantiate(spawnerPrefab, EnemyGroup.Active.homeAnchor.position + offset, Quaternion.identity);
+            var spawnerClone = Instantiate(
+                spawnerPrefab,
+                EnemyGroup.Active.homeAnchor.position + offset,
+                Quaternion.identity
+            );
             spawnerClone.visualMaterial = spawnerMaterial;
 
-            var clone = Instantiate(EnemyGroup.Active.gameObject, spawnerClone.transform.position, Quaternion.identity).GetComponent<EnemyGroup>();
+            var clone = Instantiate(
+                EnemyGroup.Active.gameObject,
+                spawnerClone.transform.position,
+                Quaternion.identity
+            ).GetComponent<EnemyGroup>();
+
             clone.enemyPrefab = EnemyGroup.Active.enemyPrefab;
             clone.homeAnchor = spawnerClone.transform;
             clone.spawnPoint = spawnerClone.transform;
@@ -61,7 +72,8 @@ namespace Misadventures.AI
             Debug.Log("Duplicated EnemyGroup with its own SpawnerAnchor.");
         }
 
-        void SpawnEnemyInActiveGroup()
+        // Spawns a single enemy in the currently active group
+        private void SpawnEnemyInActiveGroup()
         {
             if (EnemyGroup.Active == null) { Debug.LogWarning("No Active group."); return; }
             if (EnemyGroup.Active.enemyPrefab == null) { Debug.LogError("Active group missing enemyPrefab."); return; }
@@ -69,6 +81,3 @@ namespace Misadventures.AI
         }
     }
 }
-
-
-
