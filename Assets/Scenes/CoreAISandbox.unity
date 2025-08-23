@@ -1342,6 +1342,7 @@ GameObject:
   - component: {fileID: 1035581627}
   - component: {fileID: 1035581629}
   - component: {fileID: 1035581628}
+  - component: {fileID: 1035581630}
   m_Layer: 0
   m_Name: SceneManager
   m_TagString: Untagged
@@ -1416,14 +1417,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f30784ae4e38b064bace0fddfbdaab7d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  shrinkKey: 274
-  growKey: 273
-  step: 1
-  minScale: 0.4
-  maxScale: 3
-  agent: {fileID: 0}
-  baseAgentRadius: 0
-  baseAgentHeight: 2
 --- !u!195 &1035581629
 NavMeshAgent:
   m_ObjectHideFlags: 0
@@ -1446,6 +1439,23 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!114 &1035581630
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1035581624}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2fb6a366cfe0a94428fa96c495cea9ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  growKey: 273
+  shrinkKey: 274
+  scaleStep: 0.1
+  minScale: 0.3
+  maxScale: 3
 --- !u!1 &1049726882
 GameObject:
   m_ObjectHideFlags: 0
@@ -2036,8 +2046,8 @@ Camera:
   m_GameObject: {fileID: 1322053319}
   m_Enabled: 1
   serializedVersion: 2
-  m_ClearFlags: 1
-  m_BackGroundColor: {r: 0.19215687, g: 0.3019608, b: 0.4745098, a: 0}
+  m_ClearFlags: 2
+  m_BackGroundColor: {r: 0.08859915, g: 0.094500326, b: 0.103773594, a: 0}
   m_projectionMatrixMode: 1
   m_GateFitMode: 2
   m_FOVAxisMode: 0
