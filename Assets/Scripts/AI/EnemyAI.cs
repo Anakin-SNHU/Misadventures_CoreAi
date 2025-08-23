@@ -8,90 +8,91 @@ namespace Misadventures.AI
     [RequireComponent(typeof(NavMeshAgent), typeof(Collider))]
     public class EnemyAI : MonoBehaviour
     {
-        // ------------ Inspector ----------------
+        // ---------------- Inspector: configuration ----------------
 
         [Header("Group")]
-        public EnemyGroup group;
+        public EnemyGroup group;                       // Owning group; used for patrol center and hunt coordination
 
         [Header("Perception")]
-        public float viewAngle = 70f;           // half-angle in degrees
-        public float viewDistance = 12f;        // max view range
-        public float hearingRadius = 14f;       // sphere hearing radius (planar)
-        public LayerMask visionObstacles;       // currently unused; kept for future occlusion tweaks
+        public float viewAngle = 70f;                  // Vision half-angle in degrees (full FOV = viewAngle * 2)
+        public float viewDistance = 12f;               // Maximum straight-line vision distance
+        public float hearingRadius = 14f;              // Planar hearing radius (Y ignored for checks/visual)
+        public LayerMask visionObstacles;              // Reserved for occlusion rules (not currently used)
 
         [Header("Movement and Combat")]
-        public float attackRange = 1.8f;        // how close we must be to strike
-        public float patrolPointTolerance = 0.6f;
-        public float patrolWait = 1.0f;
-        public float huntSpeedMultiplier = 1.3f;
+        public float attackRange = 1.8f;               // Required distance to resolve a strike
+        public float patrolPointTolerance = 0.6f;      // Distance considered “arrived” at a patrol waypoint
+        public float patrolWait = 1.0f;                // Pause duration at each patrol waypoint
+        public float huntSpeedMultiplier = 1.3f;       // Speed scale while in Hunting/Attack states
 
         [Header("Visuals")]
-        public VisionCone visionCone;
-        public Color selectedEmissionColor = Color.white;
-        public float selectedEmissionStrength = 2.0f;
+        public VisionCone visionCone;                  // Vision cone mesh to visualize FOV and range
+        public Color selectedEmissionColor = Color.white; // Emission color when selected
+        public float selectedEmissionStrength = 2.0f;  // Emission intensity multiplier when selected
 
         [Header("Hearing Visual")]
-        public Material hearingMaterial;
-        public float hearingHeight = 0.05f;     // y-offset for the flat cylinder
+        public Material hearingMaterial;               // Material for the hearing radius cylinder
+        public float hearingHeight = 0.05f;            // Y thickness/offset for the hearing cylinder
 
         [Header("Attack")]
-        public int attackDamage = 10;
-        public float attackWindup = 0.35f;      // time standing still before applying damage
-        public float attackRecovery = 0.25f;    // brief lockout after a swing
-        public Material attackPulseMaterial;    // quick expanding ring to show attack area
+        public int attackDamage = 10;                  // Damage applied on a successful strike
+        public float attackWindup = 0.35f;             // Time spent winding up before applying damage
+        public float attackRecovery = 0.25f;           // Post-attack recovery during which a new swing cannot start
+        public Material attackPulseMaterial;           // Material for brief expanding ring showing attack reach
 
         [Header("Hunting")]
-        public float huntingTimeout = 6f;       // after this, go back to patrol if no visual
+        public float huntingTimeout = 6f;              // Time allowed to search after losing visual before returning to patrol
 
-        // ------------ Runtime ----------------
+        // ---------------- Runtime: state & caches ----------------
 
-        enum State { Patrol, Hunting, Attack }
+        private enum State { Patrol, Hunting, Attack } // High-level behavior state machine
 
-        State state;
-        NavMeshAgent agent;
-        Renderer rend;
-        MaterialPropertyBlock mpb;
-        int emissionColorId;
+        private State state;                            // Current AI state
+        private NavMeshAgent agent;                     // Navigation agent controlling movement
+        private Renderer rend;                          // Visual renderer used for selection emission
+        private MaterialPropertyBlock mpb;              // Property block to write per-instance material properties
+        private int emissionColorId;                    // Shader property ID for emission color
 
-        static EnemyAI active;                  // selection highlight
+        private static EnemyAI active;                  // Currently selected EnemyAI for editor/runtime highlighting
 
-        PlayerProxy currentTarget;              // who we see (if any)
-        Vector3 targetPos;                      // last known target pos or current goal
-        float baseSpeed;
-        float stateTimer;                       // reused for patrol wait
-        float huntingTimer;                     // counts down while hunting
+        private PlayerProxy currentTarget;              // Current visible player (if any)
+        private Vector3 targetPos;                      // Last known target position or current movement goal
+        private float baseSpeed;                        // Cached agent.speed baseline
+        private float stateTimer;                       // Generic timer (e.g., patrol waypoint wait)
+        private float huntingTimer;                     // Countdown while in Hunting
 
-        // Attack loop
-        bool attacking;                         // true during windup; false during recovery/idle
-        float attackTimer;                      // counts windup and recovery
+        // Attack control
+        private bool attacking;                         // True during windup; false during move/recovery
+        private float attackTimer;                      // Tracks windup and recovery durations
 
-        // Hearing viz
-        Transform hearingVis;
+        // Hearing visualization
+        private Transform hearingVis;                   // Cylinder transform used to display hearing radius
 
-        // Prevent multiple triggers per pulse
-        readonly HashSet<int> pulsesHandled = new HashSet<int>();
+        // Noise pulse deduplication
+        private readonly HashSet<int> pulsesHandled = new HashSet<int>(); // Pulse IDs already reacted to
 
-        // ------------ Unity ----------------
+        // ---------------- Unity lifecycle ----------------
 
-        void OnEnable()
+        private void OnEnable()
         {
-            NoiseSystem.OnNoiseEmitted += OnNoise;     // legacy one-shot
-            NoiseSystem.OnNoisePulse += OnNoisePulse; // expanding wave overlap
+            // Subscribe to instantaneous noises and expanding noise pulses
+            NoiseSystem.OnNoiseEmitted += OnNoise;
+            NoiseSystem.OnNoisePulse += OnNoisePulse;
         }
 
-        void OnDisable()
+        private void OnDisable()
         {
             NoiseSystem.OnNoiseEmitted -= OnNoise;
             NoiseSystem.OnNoisePulse -= OnNoisePulse;
         }
 
-        void Awake()
+        private void Awake()
         {
             agent = GetComponent<NavMeshAgent>();
             rend = GetComponentInChildren<Renderer>();
             baseSpeed = agent.speed;
 
-            // Allow runtime dragging of enemies in your sandbox
+            // Optional runtime drag helper to reposition agents during testing
             if (!TryGetComponent<RuntimeDraggable>(out _))
                 gameObject.AddComponent<RuntimeDraggable>();
 
@@ -101,25 +102,25 @@ namespace Misadventures.AI
             mpb = new MaterialPropertyBlock();
             emissionColorId = Shader.PropertyToID("_EmissionColor");
 
-            // Start with a sane default; states will override per-need
+            // Conservative defaults; specific states set stricter values as needed
             agent.stoppingDistance = 0f;
-            agent.autoBraking = true; // keeps arrivals crisp; can tweak if needed
+            agent.autoBraking = true;
         }
 
-        void Start()
+        private void Start()
         {
             if (group != null) group.Register(this);
-            GoPatrol();                 // enter initial state
-            ApplyVisionToCone();        // sync viz with values
-            BuildHearingVisual();       // draw the hearing ring
+            GoPatrol();              // Enter initial state
+            ApplyVisionToCone();     // Sync FOV/range visual
+            BuildHearingVisual();    // Create hearing radius visual
         }
 
-        void Update()
+        private void Update()
         {
-            // Selection highlight
+            // Selection highlight update
             SetSelected(this == active);
 
-            // Tick current state
+            // State tick
             switch (state)
             {
                 case State.Patrol: TickPatrol(); break;
@@ -127,34 +128,36 @@ namespace Misadventures.AI
                 case State.Attack: TickAttack(); break;
             }
 
-            // Continuous perception sweep
+            // Perception sweep (visual detection)
             ScanForPlayers();
 
-            // Keep hearing ring scaled/positioned
+            // Keep hearing visualization in sync
             UpdateHearingVisual();
         }
 
-        void OnMouseDown()
+        private void OnMouseDown()
         {
+            // Assign this instance as the active/selected agent
             if (active != null && active != this) active.SetSelected(false);
             active = this;
         }
 
-        // ------------ Helpers ----------------
+        // ---------------- Utility ----------------
 
-        float PlanarDistance(Vector3 a, Vector3 b)
+        private float PlanarDistance(Vector3 a, Vector3 b)
         {
             a.y = 0f; b.y = 0f;
             return Vector3.Distance(a, b);
         }
 
-        void SetSelected(bool enabled)
+        private void SetSelected(bool enabled)
         {
             if (rend == null) return;
-            rend.GetPropertyBlock(mpb);
 
-            // Write emission via property block to avoid material instancing overhead
+            // Write emission via property block to avoid instancing the shared material
+            rend.GetPropertyBlock(mpb);
             var c = enabled ? selectedEmissionColor * selectedEmissionStrength : Color.black;
+
             if (enabled) rend.material.EnableKeyword("_EMISSION");
             else rend.material.DisableKeyword("_EMISSION");
 
@@ -164,33 +167,33 @@ namespace Misadventures.AI
 
         public void ApplyVisionForExternalChange() { ApplyVisionToCone(); }
 
-        void ApplyVisionToCone()
+        private void ApplyVisionToCone()
         {
             if (!visionCone) return;
             visionCone.angle = viewAngle;
             visionCone.distance = viewDistance;
         }
 
-        // Consider arrived if within tolerance OR within stopping distance
-        bool ArrivedAtPoint()
+        // Considered arrived if within tolerance or the agent’s stopping distance
+        private bool ArrivedAtPoint()
         {
             float arrive = Mathf.Max(patrolPointTolerance, agent.stoppingDistance + 0.05f);
             return !agent.pathPending && agent.remainingDistance <= arrive;
         }
 
-        // ------------ States ----------------
+        // ---------------- States ----------------
 
-        void GoPatrol()
+        private void GoPatrol()
         {
             state = State.Patrol;
             stateTimer = patrolWait;
             agent.speed = baseSpeed;
-            agent.stoppingDistance = 0f;   // must reach waypoints fully
+            agent.stoppingDistance = 0f; // Fully reach patrol waypoints
             agent.isStopped = false;
             SetNextPatrolPoint(false);
         }
 
-        void TickPatrol()
+        private void TickPatrol()
         {
             if (ArrivedAtPoint())
             {
@@ -203,19 +206,19 @@ namespace Misadventures.AI
             }
         }
 
-        void GoHunting(Vector3 center)
+        private void GoHunting(Vector3 center)
         {
             state = State.Hunting;
             huntingTimer = huntingTimeout;
             agent.speed = baseSpeed * huntSpeedMultiplier;
-            agent.stoppingDistance = 0f;   // we want to reach search points fully
+            agent.stoppingDistance = 0f; // Fully traverse search points
             agent.isStopped = false;
 
             targetPos = center;
             agent.SetDestination(targetPos);
         }
 
-        void TickHunting()
+        private void TickHunting()
         {
             huntingTimer -= Time.deltaTime;
             if (huntingTimer <= 0f)
@@ -226,30 +229,29 @@ namespace Misadventures.AI
 
             if (ArrivedAtPoint())
             {
-                // Keep pacing around hunt center
+                // Continue pacing around the hunt center
                 SetNextPatrolPoint(true);
             }
         }
 
-        void GoAttack(Vector3 pos)
+        private void GoAttack(Vector3 pos)
         {
             state = State.Attack;
             agent.speed = baseSpeed * huntSpeedMultiplier;
 
-            // Stop near target so we can wind-up swings in place
+            // Stop close to target to allow in-place windup
             agent.stoppingDistance = Mathf.Max(0.01f, attackRange * 0.9f);
             agent.isStopped = false;
 
             targetPos = pos;
             agent.SetDestination(targetPos);
 
-            // entering Attack does not immediately start a swing;
-            // TickAttack handles chase->stop->windup->hit->recovery
+            // Attack loop begins in TickAttack; no immediate strike on entry
             attacking = false;
             attackTimer = 0f;
         }
 
-        void TickAttack()
+        private void TickAttack()
         {
             float distToTarget = (currentTarget != null)
                 ? PlanarDistance(transform.position, currentTarget.transform.position)
@@ -259,14 +261,14 @@ namespace Misadventures.AI
             {
                 if (currentTarget != null && distToTarget <= attackRange)
                 {
-                    // In range: stop and start wind-up
+                    // In range: wind up, pause movement, and preview reach
                     agent.isStopped = true;
                     attacking = true;
                     attackTimer = attackWindup;
 
-                    SpawnAttackPulse(); // quick visual of reach
+                    SpawnAttackPulse();
 
-                    // Face the target for readability
+                    // Face current target for clarity
                     Vector3 look = currentTarget.transform.position - transform.position;
                     look.y = 0f;
                     if (look.sqrMagnitude > 0.001f)
@@ -274,34 +276,34 @@ namespace Misadventures.AI
                 }
                 else
                 {
-                    // Not yet in range: keep closing toward last known position
+                    // Not in range: continue to chase last known position
                     agent.isStopped = false;
                     agent.SetDestination(targetPos);
                 }
             }
             else
             {
-                // During wind-up we do not move
+                // Windup: remain stationary until timer elapses
                 agent.isStopped = true;
                 attackTimer -= Time.deltaTime;
 
                 if (attackTimer <= 0f)
                 {
-                    // Resolve the hit only if still in range
+                    // Resolve damage only if still in range
                     if (currentTarget != null && distToTarget <= attackRange)
                     {
                         var hp = currentTarget.GetComponent<PlayerHealth>();
                         if (hp != null) hp.TakeDamage(attackDamage);
                     }
 
-                    // Start recovery; after this frame we allow movement again
+                    // Begin recovery; movement resumes after this frame
                     attacking = false;
                     attackTimer = attackRecovery;
                     agent.isStopped = false;
                 }
             }
 
-            // Soft leash back to patrol if we stray too far from group
+            // Soft leash back to patrol if straying beyond group radius
             if (group != null)
             {
                 float distCenter = Vector3.Distance(transform.position, group.transform.position);
@@ -313,9 +315,9 @@ namespace Misadventures.AI
             }
         }
 
-        // ------------ Patrol Utilities ----------------
+        // ---------------- Patrol utilities ----------------
 
-        void SetNextPatrolPoint(bool nearCenter)
+        private void SetNextPatrolPoint(bool nearCenter)
         {
             if (group == null) return;
 
@@ -323,16 +325,16 @@ namespace Misadventures.AI
             Vector2 v = Random.insideUnitCircle * r;
             Vector3 candidate = group.transform.position + new Vector3(v.x, 0f, v.y);
 
-            // Snap to NavMesh
+            // Snap to NavMesh or fall back to group center
             if (NavMesh.SamplePosition(candidate, out var hit, r, NavMesh.AllAreas))
                 agent.SetDestination(hit.position);
             else
                 agent.SetDestination(group.transform.position);
         }
 
-        // ------------ Perception ----------------
+        // ---------------- Perception ----------------
 
-        void ScanForPlayers()
+        private void ScanForPlayers()
         {
             var players = FindObjectsByType<PlayerProxy>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 
@@ -341,16 +343,14 @@ namespace Misadventures.AI
 
             foreach (var p in players)
             {
-                // Cheap early outs
                 Vector3 to = p.transform.position - transform.position;
                 float dist = to.magnitude;
                 if (dist > viewDistance) continue;
 
-                // FOV cone check
                 float ang = Vector3.Angle(transform.forward, to);
                 if (ang > viewAngle) continue;
 
-                // LoS check; we allow any collider but want to know if the first hit is the player
+                // Line-of-sight check: first hit must be the target’s proxy
                 if (Physics.Raycast(transform.position + Vector3.up * 0.5f,
                                     to.normalized,
                                     out var hit,
@@ -367,40 +367,37 @@ namespace Misadventures.AI
 
             if (best != null)
             {
-                targetPos = best.transform.position;  // update last known
+                targetPos = best.transform.position;  // Update last known
                 currentTarget = best;
 
-                // Move the group's hunt center only on visual contact
+                // Move group hunt center only when there is visual confirmation
                 if (group != null) group.SetHuntCenter(targetPos, group.huntDuration);
 
-                // Enter Attack state once; TickAttack manages movement/strikes
                 if (state != State.Attack) GoAttack(targetPos);
             }
             else
             {
-                // Lost visual while attacking -> switch to hunting last known
+                // Lost visual while attacking: transition to Hunting around last known
                 if (state == State.Attack) GoHunting(targetPos);
                 currentTarget = null;
             }
         }
 
-        // Called for discrete "sound events"
-        void OnNoise(NoiseEvent e)
+        // ---------------- Noise reactions ----------------
+
+        private void OnNoise(NoiseEvent e)
         {
-            // Individual enemies react; group area does not move on sound alone
-            // Use planar distance so height does not matter much for hearing
+            // React to discrete sound if within planar hearing range; group center is not moved by sound alone
             Vector3 a = transform.position; a.y = 0f;
             Vector3 b = e.position; b.y = 0f;
+
             if (Vector3.Distance(a, b) <= hearingRadius)
-            {
                 GoHunting(e.position);
-            }
         }
 
-        // Called repeatedly by the expanding pulse so we can trigger when the wavefront
-        // overlaps the hearing sphere (dist <= pulseRadius + hearingRadius)
-        void OnNoisePulse(NoisePulse p)
+        private void OnNoisePulse(NoisePulse p)
         {
+            // Trigger once per pulse ID when wavefront overlaps this hearing radius
             if (pulsesHandled.Contains(p.pulseId)) return;
 
             Vector3 a = transform.position; a.y = 0f;
@@ -410,13 +407,13 @@ namespace Misadventures.AI
             if (dist <= p.currentRadius + hearingRadius)
             {
                 pulsesHandled.Add(p.pulseId);
-                GoHunting(p.position); // check the noise location
+                GoHunting(p.position);
             }
         }
 
-        // ------------ Hearing Visual ----------------
+        // ---------------- Hearing visual ----------------
 
-        void BuildHearingVisual()
+        private void BuildHearingVisual()
         {
             var s = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             s.name = "Hearing_Vis";
@@ -424,7 +421,7 @@ namespace Misadventures.AI
             s.transform.localRotation = Quaternion.identity;
 
             var col = s.GetComponent<Collider>();
-            if (col) Destroy(col);                       // purely visual
+            if (col) Destroy(col); // Visual-only
 
             var mr = s.GetComponent<MeshRenderer>();
             if (mr && hearingMaterial != null) mr.sharedMaterial = hearingMaterial;
@@ -435,17 +432,18 @@ namespace Misadventures.AI
             UpdateHearingVisual();
         }
 
-        void UpdateHearingVisual()
+        private void UpdateHearingVisual()
         {
             if (hearingVis == null) return;
+
             float diameter = Mathf.Max(0.1f, hearingRadius * 2f);
             hearingVis.position = transform.position + Vector3.up * hearingHeight;
             hearingVis.localScale = new Vector3(diameter, hearingHeight, diameter);
         }
 
-        // ------------ Attack Visual ----------------
+        // ---------------- Attack visual ----------------
 
-        void SpawnAttackPulse()
+        private void SpawnAttackPulse()
         {
             if (attackPulseMaterial == null) return;
 
@@ -454,7 +452,7 @@ namespace Misadventures.AI
             cyl.transform.position = transform.position + Vector3.up * 0.05f;
 
             var col = cyl.GetComponent<Collider>();
-            if (col) Destroy(col);
+            if (col) Destroy(col); // Visual-only
 
             var mr = cyl.GetComponent<MeshRenderer>();
             if (mr != null) mr.sharedMaterial = attackPulseMaterial;
@@ -462,27 +460,26 @@ namespace Misadventures.AI
             cyl.layer = LayerMask.NameToLayer("Ignore Raycast");
 
             var pulse = cyl.AddComponent<AttackPulse>();
-            pulse.maxRadius = attackRange;  // ring grows to attack reach
-            pulse.lifetime = 0.25f;        // quick pop
+            pulse.maxRadius = attackRange;   // Ring expands to attack reach
+            pulse.lifetime = 0.25f;          // Quick indicator
             pulse.pulseMaterial = attackPulseMaterial;
         }
 
-        // ------------ Scale Enemy ----------------
+        // ---------------- External scale hook ----------------
 
         public void ApplyEnemyScale(float factor)
         {
-            // scale visuals
+            // Visual scale
             transform.localScale *= factor;
 
-            // scale perception/combat numbers
+            // Perception/combat scaling
             viewDistance *= factor;
             hearingRadius *= factor;
             attackRange *= factor;
 
-            // push to visuals immediately
+            // Sync associated visuals
             ApplyVisionToCone();
             UpdateHearingVisual();
         }
-
     }
 }
